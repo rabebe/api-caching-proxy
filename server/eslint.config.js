@@ -26,7 +26,7 @@ export default [
   // 3. Define custom rules
   {
     rules: {
-      "no-console": "warn", // Allows console.log but flags it
+      "no-console": "off", // Allow console.log statements for debugging
       "no-unused-vars": "error", // Prevents leaving unused variables
       "no-var": "error", // Enforce use of const/let instead of var
       "prefer-const": "error", // Enforce const when variable is not reassigned
