@@ -1,18 +1,17 @@
-import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, Auth } from 'firebase/auth';
+import { initializeApp, FirebaseApp, getApps, getApp } from 'firebase/app';
+import { getAuth, signInAnonymously, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
 // --- Global Variables provided by the execution environment ---
-// IMPORTANT: These variables are injected at runtime and are mandatory for connection.
-
-// The Firebase configuration object (parsed from a JSON string)
-declare const __firebase_config: string; 
-
-// The initial custom authentication token for the current user
-declare const __initial_auth_token: string | undefined;
-
-// The unique identifier for the current application artifact
-declare const __app_id: string; 
+const firebaseConfig = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+};
 
 // --- Core Initialization Logic (Singleton Management) ---
 
@@ -41,45 +40,48 @@ export function getPublicCollectionPath(collectionName: string, appId: string): 
  * @returns {Promise<{db: Firestore, appId: string, userId: string}>} The Firestore instance and necessary context.
  */
 export async function getFirebaseContext(): Promise<{ db: Firestore, appId: string, userId: string }> {
-  if (isInitialized) {
+  const configAppId = firebaseConfig.appId || firebaseConfig.projectId || 'default-nextjs-app';
+  
+  if (isInitialized && getApps().length > 0) {
     // If already initialized, return existing instances
     return {
         db, 
-        appId: typeof __app_id !== 'undefined' ? __app_id : 'default-app-id',
+        appId: configAppId,
         userId: auth.currentUser?.uid || 'anonymous-user' 
     };
   }
 
-  // 1. Parse configuration
-  const firebaseConfig = JSON.parse(__firebase_config);
-  const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-  // 2. Initialize App and Services
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-
+    // Check for required configuration
+  if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+      console.error("Firebase Initialization Error: API Key or Project ID is missing from environment variables.");
+      throw new Error('Could not connect to database services due to missing configuration.');
+  }
+  
   try {
-    // 3. Authenticate the user
-    if (typeof __initial_auth_token !== 'undefined') {
-      // Use the custom token if provided (preferred for authenticated users)
-      await signInWithCustomToken(auth, __initial_auth_token);
+    
+    // 2. Initialize App and Services
+    if (getApps().some((a: FirebaseApp) => a.name === configAppId)) {
+      app = getApp(configAppId);
     } else {
-      // Sign in anonymously if no token is available
-      await signInAnonymously(auth);
+      app = initializeApp(firebaseConfig, configAppId);
     }
+    
+    auth = getAuth(app);
+    db = getFirestore(app);
+    
+    await signInAnonymously(auth);
     
     // Check if sign-in was successful
     if (!auth.currentUser) {
-        throw new Error("Authentication failed: No user is currently signed in.");
+      throw new Error("Authentication failed: No user is currently signed in.");
     }
-
+    
     isInitialized = true;
     
     const userId = auth.currentUser.uid;
     
     // Return the initialized Firestore instance, App ID, and User ID
-    return { db, appId, userId };
+    return { db, appId: configAppId, userId };
 
   } catch (error) {
     console.error("Firebase authentication and initialization failed:", error);
