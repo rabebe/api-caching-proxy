@@ -31,6 +31,12 @@ const WeatherPage = () => {
       setLoading(false);
       return;
     }
+
+    if (!CLIENT_API_TOKEN) {
+        setError('Configuration Error: Client API Token is missing. Please check NEXT_PUBLIC_CLIENT_TOKEN.');
+        setLoading(false);
+        return;
+    }
     
     console.log(`[Frontend Fetch] Attempting to fetch city: "${searchCity.trim()}"`);
 
@@ -40,7 +46,7 @@ const WeatherPage = () => {
     try {
       const response = await fetch(url, {
         headers: {
-          'X-API-Key': CLIENT_API_TOKEN || '',
+          'X-API-Key': CLIENT_API_TOKEN,
           'Content-Type': 'application/json',
         },
       });
