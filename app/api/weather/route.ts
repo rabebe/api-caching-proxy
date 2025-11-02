@@ -1,4 +1,79 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+import { getFirestore, doc, getDoc, setDoc, Firestore, Timestamp } from 'firebase/firestore';
+
+export const revalidate = 300;
+
+// --- Firebase Configuration from Environment Variables ---
+const firebaseConfig = {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY as string | undefined,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID as string | undefined,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID as string | undefined,
+};
+
+let firestoreInstance: Firestore | null = null;
+let firebaseAppInstance: FirebaseApp | null = null;
+
+// 1. Type Guard: Checks if an object is a Firestore Timestamp instance
+function isFirestoreTimestamp(value: unknown): value is Timestamp {
+    if (typeof value !== 'object' || value === null) {
+        return false;
+    }
+    
+    const hasToMillis = (value as { toMillis: unknown }).toMillis;
+    return typeof hasToMillis === 'function';
+
+}
+
+// 2. Helper to safely get milliseconds regardless of the stored type
+function getTimestampInMs(timestamp: number | Timestamp): number {
+    if (isFirestoreTimestamp(timestamp)) {
+        return timestamp.toMillis();
+    }
+    // Assume it's already a number (milliseconds since epoch) if not a Timestamp object
+    if (typeof timestamp === 'number') {
+        return timestamp;
+    }
+    // Fallback for safety
+    return 0;
+}
+
+// Internal function to initialize Firebase client SDK safely on the server
+function getFirestoreInstance(): Firestore | null {
+    if (firestoreInstance) {
+        return firestoreInstance;
+    }
+
+    try {
+        const configAppId = (firebaseConfig.appId || firebaseConfig.projectId || 'default-nextjs-app') as string;
+
+        if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+            console.error("FIREBASE CONFIG ERROR: Global variables (__firebase_config or __app_id) are unavailable in this execution context. Skipping Firestore operations.");
+            return null;
+        }
+        
+        const existingApps = getApps();
+        
+        if (existingApps.some((a: FirebaseApp) => a.name === configAppId)) {
+            firebaseAppInstance = getApp(configAppId);
+        } else {
+            firebaseAppInstance = initializeApp(firebaseConfig, configAppId); 
+        }
+        
+        firestoreInstance = getFirestore(firebaseAppInstance);
+        return firestoreInstance;
+
+    } catch (e) {
+        console.error("Failed to initialize Firebase or parse config:", e);
+        return null;
+    }
+}
+
+// Utility to generate the required public path using the provided global ID
+function getPublicCollectionPathLocal(collectionName: string): string {
+    const configAppId = (process.env.NEXT_PUBLIC_FIREBASE_APP_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'default-app-id') as string;
+    return `artifacts/${configAppId}/public/data/${collectionName}`;
+}
 
 // --- Interface Setup (Matches Frontend) ---
 interface WeatherData {
@@ -11,7 +86,7 @@ interface WeatherData {
 }
 
 interface CacheEntry {
-    data: WeatherData;
+    data: Omit<WeatherData, 'source'>;
     timestamp: number;
 }
 
@@ -41,13 +116,10 @@ const WEATHER_CODE_MAP: { [key: number]: string } = {
     // (A comprehensive map would be much longer, but this covers the basics)
 };
 
-const weatherCache = new Map<string, CacheEntry>();
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 // --- ENVIRONMENT VARIABLES (Only need client token) ---
 const PUBLIC_TOKEN_FOR_VALIDATION = process.env.CLIENT_TOKEN;
-// Note: EXTERNAL_API_KEY is removed as Open-Meteo is free.
-
 
 // 🌐 The Route Handler uses search parameters
 export async function GET(request: NextRequest) {
@@ -68,11 +140,34 @@ export async function GET(request: NextRequest) {
     const cacheKey = city.toLowerCase().trim();
     const currentTime = Date.now();
 
-    // 2. Check Cache
-    const cachedData = weatherCache.get(cacheKey);
-    if (cachedData && (currentTime - cachedData.timestamp) < CACHE_DURATION_MS) {
-        console.log(`Cache hit for city: ${city}`);
-        return NextResponse.json({ ...cachedData.data, source: 'cache' }, { status: 200 });
+    // Initialize Firestore
+    const db = getFirestoreInstance();
+
+    // 2. Check Firestore Cache (Replaces in-memory Map check)
+    if (db) {
+        try {
+            const cacheCollectionPath = getPublicCollectionPathLocal('weather_cache');
+            console.log(`[Firestore Read] Path being requested: ${cacheCollectionPath}/${cacheKey}`);
+
+            const cacheDocRef = doc(db, cacheCollectionPath, cacheKey);
+            const cacheDoc = await getDoc(cacheDocRef);
+            
+            if (cacheDoc.exists()) {
+                const cachedEntry = cacheDoc.data() as CacheEntry;
+
+                const timestampMs = getTimestampInMs(cachedEntry.timestamp);
+
+                
+                // Check if the timestamp is within the 5-minute duration
+                if ((currentTime - timestampMs) < CACHE_DURATION_MS) {
+                    console.log(`Cache hit for city: ${city} (Firestore)`);
+                    // Return cached data and explicitly set source to 'cache'
+                    return NextResponse.json({ ...cachedEntry.data, source: 'cache' }, { status: 200 });
+                }
+            }
+        } catch (dbError) {
+            console.error(`[Firestore Read Error] Failed to read cache for ${city}:`, dbError);
+        }
     }
 
     // --- 3. FETCH: Geocoding (City Name to Lat/Lon) ---
@@ -119,9 +214,32 @@ export async function GET(request: NextRequest) {
             source: 'api',
         };
 
-        weatherCache.set(cacheKey, { data: TransformedData, timestamp: currentTime });
+        // --- 6. Write to Firestore Cache (Replaces in-memory write) ---
+        if (db) {
+            try {
+                // Strip the 'source' field before caching
+                const dataWithoutSource: Omit<WeatherData, 'source'> = {
+                    cityName: TransformedData.cityName,
+                    temperature: TransformedData.temperature,
+                    description: TransformedData.description,
+                    windMph: TransformedData.windMph,
+                    lastUpdated: TransformedData.lastUpdated,
+                };
 
-        // 6. Return Response
+                const cacheDocRef = doc(db, getPublicCollectionPathLocal('weather_cache'), cacheKey);
+                const dataToCache: CacheEntry = { 
+                    data: dataWithoutSource, 
+                    timestamp: currentTime 
+                };
+                
+                // Write the new data to Firestore
+                await setDoc(cacheDocRef, dataToCache);
+            } catch (dbError) {
+                console.error(`[Firestore Write Error] Failed to write cache for ${city}:`, dbError);
+            }
+        }
+
+        // 7. Return Response
         return NextResponse.json(TransformedData, { status: 200 });
             
     } catch (error) {
