@@ -78,11 +78,20 @@ function getPublicCollectionPathLocal(collectionName: string): string {
 // --- Interface Setup (Matches Frontend) ---
 interface WeatherData {
     cityName: string;
+    country: string; // <-- ADDED: Country is now included
     temperature: number; // Sticking to number for easier manipulation
     description: string;
     windKmh: number;
     lastUpdated: string; // Time string
     source: 'cache' | 'api';
+
+    apparentTemperature: number;
+    windGusts: number;
+    cloudCover: number;
+    isDay: number; // 1 for day, 0 for night
+    humidity: number;
+    tempMax: number;
+    tempMin: number;
 }
 
 interface CacheEntry {
@@ -180,14 +189,27 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: `Could not find coordinates for city: ${city}` }, { status: 404 });
         }
 
-        const { latitude, longitude, name: geoCityName } = geoData.results[0];
+        // MODIFIED: Destructure 'country' from the geocoding result
+        const { latitude, longitude, name: geoCityName, country } = geoData.results[0];
 
         // --- 4. FETCH: Weather Data (Lat/Lon to Weather) ---
         const WEATHER_API_URL = 'https://api.open-meteo.com/v1/forecast';
+
+        const CURRENT_WEATHER_VARS = [
+            'temperature_2m', 
+            'apparent_temperature', 
+            'is_day', 
+            'weather_code', 
+            'wind_speed_10m',
+            'wind_gusts_10m',
+            'relative_humidity_2m', 
+            'cloud_cover',
+        ];
         
         // Request current weather and imperial units for wind speed to match frontend 
         // We'll use metric for temperature (Celsius) and convert wind later just in case.
-        const weatherFetchUrl = `${WEATHER_API_URL}?latitude=${latitude}&longitude=${longitude}&current_weather=true&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto`;
+        // NOTE: The URL uses 'current', so the response object uses the key 'current'.
+        const weatherFetchUrl = `${WEATHER_API_URL}?latitude=${latitude}&longitude=${longitude}&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto&current=${CURRENT_WEATHER_VARS.join(',')}&daily=temperature_2m_max,temperature_2m_min`;
 
         const weatherResponse = await fetch(weatherFetchUrl);
         const weatherData = await weatherResponse.json();
@@ -199,17 +221,31 @@ export async function GET(request: NextRequest) {
         }
 
         // --- 5. Transform and Cache ---
-        const current = weatherData.current_weather;
+        // ⚠️ FIX: Accessing weatherData.current instead of weatherData.current_weather
+        const current = weatherData.current; 
+        const daily = weatherData.daily;
         
         const TransformedData: WeatherData = {
             cityName: geoCityName,
-            temperature: current.temperature, // Already Celsius
+            country: country, // ADDED: Include country in the returned object
+            // Use Math.round for temperature for cleaner display
+            temperature: Math.round(current.temperature_2m), 
             // Map the WMO code to a text description
-            description: WEATHER_CODE_MAP[current.weathercode] || 'Unknown Condition', 
-            // Convert wind speed from km/h to mph, and round it
-            windKmh: Math.round(current.windspeed * 10) / 10,
+            description: WEATHER_CODE_MAP[current.weather_code] || 'Unknown Condition', 
+            // Round wind to one decimal place
+            windKmh: Math.round(current.wind_speed_10m * 10) / 10,
             lastUpdated: current.time,
             source: 'api',
+            
+            // Apply rounding and null checks for new fields:
+            apparentTemperature: Math.round(current.apparent_temperature),
+            windGusts: Math.round(current.wind_gusts_10m * 10) / 10,
+            cloudCover: Math.round(current.cloud_cover),
+            isDay: current.is_day,
+            humidity: Math.round(current.relative_humidity_2m),
+            // Use nullish coalescing (?? 0) for daily fields to prevent NaN if missing
+            tempMax: daily.temperature_2m_max[0] ?? 0,
+            tempMin: daily.temperature_2m_min[0] ?? 0,
         };
 
         // --- 6. Write to Firestore Cache (Replaces in-memory write) ---
@@ -218,10 +254,19 @@ export async function GET(request: NextRequest) {
                 // Strip the 'source' field before caching
                 const dataWithoutSource: Omit<WeatherData, 'source'> = {
                     cityName: TransformedData.cityName,
+                    country: TransformedData.country, // ADDED: Include country in cached data
                     temperature: TransformedData.temperature,
                     description: TransformedData.description,
                     windKmh: TransformedData.windKmh,
                     lastUpdated: TransformedData.lastUpdated,
+
+                    apparentTemperature: TransformedData.apparentTemperature,
+                    windGusts: TransformedData.windGusts,
+                    cloudCover: TransformedData.cloudCover,
+                    isDay: TransformedData.isDay,
+                    humidity: TransformedData.humidity,
+                    tempMax: TransformedData.tempMax,
+                    tempMin: TransformedData.tempMin,
                 };
 
                 const cacheDocRef = doc(db, getPublicCollectionPathLocal('weather_cache'), cacheKey);
