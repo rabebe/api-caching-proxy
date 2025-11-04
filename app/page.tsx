@@ -9,7 +9,7 @@ interface WeatherData {
   cityName: string;
   temperature: string;
   condition: string;
-  windMph: number;
+  windKmh: number;
   lastUpdated: number;
   source: 'cache' | 'api';
   error?: string;
@@ -157,13 +157,13 @@ const WeatherPage = () => {
                             {/* Condition */}
                             <p className="flex items-center text-gray-700 text-lg">
                                 <Cloud className="w-5 h-5 text-gray-500 mr-3" />
-                                **Condition:** {weather.condition}
+                                Condition: {weather.condition}
                             </p>
 
                             {/* Wind Speed */}
                             <p className="flex items-center text-gray-700 text-lg">
                                 <Wind className="w-5 h-5 text-gray-500 mr-3" />
-                                **Wind Speed:** {weather.windMph} mph
+                                Wind Speed: {weather.windKmh} km/h
                             </p>
                         </div>
                     </div>

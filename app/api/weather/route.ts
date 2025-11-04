@@ -80,7 +80,7 @@ interface WeatherData {
     cityName: string;
     temperature: number; // Sticking to number for easier manipulation
     description: string;
-    windMph: number;
+    windKmh: number;
     lastUpdated: string; // Time string
     source: 'cache' | 'api';
 }
@@ -90,8 +90,6 @@ interface CacheEntry {
     timestamp: number;
 }
 
-// 🌬️ Constant for converting km/h (Open-Meteo default) to mph
-const KMH_TO_MPH = 0.621371;
 
 // 🌡️ Simple map for weather codes (Open-Meteo uses WMO codes)
 const WEATHER_CODE_MAP: { [key: number]: string } = {
@@ -209,7 +207,7 @@ export async function GET(request: NextRequest) {
             // Map the WMO code to a text description
             description: WEATHER_CODE_MAP[current.weathercode] || 'Unknown Condition', 
             // Convert wind speed from km/h to mph, and round it
-            windMph: Math.round(current.windspeed * KMH_TO_MPH * 10) / 10,
+            windKmh: Math.round(current.windspeed * 10) / 10,
             lastUpdated: current.time,
             source: 'api',
         };
@@ -222,7 +220,7 @@ export async function GET(request: NextRequest) {
                     cityName: TransformedData.cityName,
                     temperature: TransformedData.temperature,
                     description: TransformedData.description,
-                    windMph: TransformedData.windMph,
+                    windKmh: TransformedData.windKmh,
                     lastUpdated: TransformedData.lastUpdated,
                 };
 
