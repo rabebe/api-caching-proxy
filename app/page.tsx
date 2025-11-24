@@ -54,12 +54,8 @@ const getWeatherIcon = (description: string, isDay: number) => {
     return <Cloud className="w-16 h-16 text-gray-400 drop-shadow-lg" />;
 };
 
-// --- UTILITY FUNCTION: Determine Time of Day for Intro Background ---
-// *** REMOVED: getTimeOfDayClass function ***
-// --- END UTILITY FUNCTION ---
 
-
-// --- NEW COMPONENT: Dynamic Background Weather Icon (UPDATED FOR MULTIPLE SMALL ICONS) ---
+// --- Dynamic Background Weather Icon ---
 interface BackgroundIconProps {
     description: string;
     isDay: number;
@@ -442,7 +438,6 @@ const WeatherPage = () => {
     try {
       const response = await fetch(url, {
         headers: {
-          'X-API-Key': CLIENT_API_TOKEN,
           'Content-Type': 'application/json',
         },
       });
@@ -480,7 +475,7 @@ const WeatherPage = () => {
     setError(null);
   }, []);
   
-  // 🆕 NEW FUNCTIONALITY: Clears the currently displayed weather card, but keeps the history and stays on the dashboard.
+  // Clears the currently displayed weather card, but keeps the history and stays on the dashboard.
   const clearCurrentView = useCallback(() => {
     setWeather(null);
     setCity(''); // Clear the search bar too
@@ -528,11 +523,11 @@ const WeatherPage = () => {
   
   let outerBgClass = ''; 
   let backgroundEffectClass = '';
-  // ⭐ CORRECTED: Initialize introPatternClass
+  // Initialize introPatternClass
   let introPatternClass = ''; 
 
   if (isIntroMode) {
-      // 🟢 CHANGE: Use a static clear sky gradient instead of time-based function
+      // Use a static clear sky gradient instead of time-based function
       outerBgClass = 'bg-gradient-to-br from-blue-400 to-sky-600'; 
       introPatternClass = 'intro-pattern-overlay isolate'; 
   } else if (weather) {
@@ -611,7 +606,7 @@ const WeatherPage = () => {
                                 </h2>
                                 
                                 <button 
-                                    onClick={clearCurrentView} // ⬅️ NEW FUNCTIONALITY HERE
+                                    onClick={clearCurrentView} // Clear current view button
                                     className="text-sm font-semibold text-gray-700 hover:text-blue-700 transition-colors px-3 py-1 rounded-md border border-gray-400 hover:border-blue-600 bg-white/50 flex items-center shadow-sm"
                                     aria-label="Clear current view"
                                 >
@@ -646,7 +641,7 @@ const WeatherPage = () => {
                                         <p className="flex items-center">
                                             To fully clear your search history and return to the Home Page, 
                                             <button 
-                                                onClick={clearHistoryAndResetApp} // ⬅️ Full reset button
+                                                onClick={clearHistoryAndResetApp} // Full reset button
                                                 disabled={loading}
                                                 className="text-red-600 font-bold hover:text-red-800 transition-colors ml-1 disabled:text-red-300 underline p-0 m-0 bg-transparent border-none cursor-pointer"
                                             >
