@@ -100,7 +100,7 @@ interface CacheEntry {
 }
 
 
-// 🌡️ Simple map for weather codes (Open-Meteo uses WMO codes)
+// Simple map for weather codes (Open-Meteo uses WMO codes)
 const WEATHER_CODE_MAP: { [key: number]: string } = {
     0: 'Clear Sky',
     1: 'Mainly Clear',
@@ -126,17 +126,10 @@ const WEATHER_CODE_MAP: { [key: number]: string } = {
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 // --- ENVIRONMENT VARIABLES (Only need client token) ---
-const PUBLIC_TOKEN_FOR_VALIDATION = process.env.CLIENT_TOKEN;
 
-// 🌐 The Route Handler uses search parameters
+// The Route Handler uses search parameters
 export async function GET(request: NextRequest) {
     
-    // 1. Validate API Key from Client (Security Check remains)
-    const clientKey = request.headers.get('x-api-key');
-    if (clientKey !== PUBLIC_TOKEN_FOR_VALIDATION) {
-        return NextResponse.json({ error: 'Unauthorized: Invalid API Key' }, { status: 401 });
-    }
-
     // Extract city parameter
     const city = request.nextUrl.searchParams.get('city'); 
     
@@ -206,9 +199,6 @@ export async function GET(request: NextRequest) {
             'cloud_cover',
         ];
         
-        // Request current weather and imperial units for wind speed to match frontend 
-        // We'll use metric for temperature (Celsius) and convert wind later just in case.
-        // NOTE: The URL uses 'current', so the response object uses the key 'current'.
         const weatherFetchUrl = `${WEATHER_API_URL}?latitude=${latitude}&longitude=${longitude}&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto&current=${CURRENT_WEATHER_VARS.join(',')}&daily=temperature_2m_max,temperature_2m_min`;
 
         const weatherResponse = await fetch(weatherFetchUrl);
@@ -221,7 +211,6 @@ export async function GET(request: NextRequest) {
         }
 
         // --- 5. Transform and Cache ---
-        // ⚠️ FIX: Accessing weatherData.current instead of weatherData.current_weather
         const current = weatherData.current; 
         const daily = weatherData.daily;
         
