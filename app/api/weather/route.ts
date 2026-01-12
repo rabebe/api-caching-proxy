@@ -8,20 +8,31 @@ export async function GET(req: NextRequest) {
   if (!city) return NextResponse.json({ error: 'City required' }, { status: 400 });
 
   const cacheKey = city.toLowerCase();
-
-  // --- Rate limiting ---
   const ip = req.headers.get('x-forwarded-for') || cacheKey;
-  if (!allowRequest(ip)) {
-    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
-  }
 
-  // --- Cache check ---
+  // --- Check cache first ---
   const cached = await getCachedData<WeatherData>(cacheKey, 'weather_cache');
   if (cached && isCacheValid(cached)) {
+    // Apply soft rate limit for cached requests
+    const { allowed, reason } = await allowRequest(ip, false); // soft limit
+    if (!allowed) {
+      return NextResponse.json({ error: `Rate limit exceeded (${reason})` }, { status: 429 });
+    }
+
     return NextResponse.json({ ...cached.data, source: 'cache' });
   }
 
-  // --- Fetch from API with error handling & stale fallback ---
+  // --- Hard limit for fresh API requests ---
+  const { allowed: apiAllowed, reason: apiReason } = await allowRequest(ip, true); // hard limit
+  if (!apiAllowed) {
+    if (cached) {
+      // Return stale cache if available
+      return NextResponse.json({ ...cached.data, source: 'stale_cache' });
+    }
+    return NextResponse.json({ error: `Rate limit exceeded (${apiReason})` }, { status: 429 });
+  }
+
+  // --- Fetch from external API ---
   try {
     const fresh = await fetchWeather(city);
     await setCachedData(cacheKey, 'weather_cache', fresh);
