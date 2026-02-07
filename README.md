@@ -1,90 +1,97 @@
-# Caching Weather Client
+# Weather API Proxy & Resilient Middleware
 
-This is a single-page, responsive application designed to provide current weather data for any specified city while demonstrating an efficient data caching strategy using Firebase Firestore. The primary goal of this project is to minimize external $\text{API}$ calls by serving recent data from a public cache, significantly improving response time and reducing costs associated with high-frequency external lookups.
+## Overview
+This project is a full-stack API Proxy that sits between a client application and external weather APIs. Its primary goals are:
+- Protect API Keys — prevent exposure in client apps.
+- Reduce Costs — limit unnecessary external API calls.
+- Ensure Reliability — serve cached data even under API failures.
 
-## Features
+The system uses multi-tier caching, IP-based rate limiting, and stale-while-revalidate logic to provide fast, resilient responses to end-users.
 
-- Intelligent Caching: Weather data is stored in a public Firestore cache. Subsequent requests for the same city within a 5-minute window are served instantly from the cache.
-- External Data Fetch: When the cache is stale or empty, the application securely fetches the latest weather conditions from a simulated external $\text{API}$.
-- User Search History: Tracks and displays a log of the user's recent searches, allowing for quick re-fetching of weather data.
-- Real-time Updates: The search history log is updated in real-time using Firestore's onSnapshot listeners.
-- Dynamic UI: The background changes dynamically based on the current weather conditions (e.g., sunny, rainy, thunderstorm).
+---
 
-## Technology Stack
+## System Architecture
+The proxy acts as a gateway, controlling data flow between client, cache, and external providers.
 
-This application is built as a single, self-contained React file for streamlined deployment.
+```mermaid
+graph TD
+    User[Client Browser] -- 1. Request Weather --> Proxy[Next.js API Proxy]
+    Proxy -- 2. Rate Limit Check --> Redis{Upstash Redis}
+    Redis -- "Limit Exceeded?" --> User
+    Proxy -- 3. Check Cache --> Firestore[(Firebase Firestore)]
+    
+    Firestore -- "Hit (Valid TTL)" --> User
+    Firestore -- "Miss / Stale" --> API[External Weather API]
+    
+    API -- 4. Return Data --> Proxy
+    Proxy -- 5. Update Cache --> Firestore
+    Proxy -- 6. Log Search History --> UserHistory[(Session / Global History)]
+    Proxy -- 7. Send Optimized JSON --> User
+```
 
-Frontend: React (Functional Components & Hooks)
-Language: TypeScript (for strong typing, especially for state and data structures like WeatherData).
-Styling: Tailwind CSS (for utility-first, responsive design).
-Database/Backend: Firebase Firestore (used for public caching and per-user search history).
-Authentication: Firebase Auth (handles user authentication, setting up the required userId for Firestore access).
-Asynchronicity: async/await and Promises, with useCallback and useMemo for performance optimization.
+## Key Features
+1. Proxy Pattern
+    - Keeps API keys secure on the server.
+    - Prevents client-side exposure while serving filtered data.
 
-## How the Caching Logic Works
+2. Multi-Tier Caching
+    - Uses Firestore as a persistent cache (TTL = 5 min).
+    - Reduces external API calls for repeated queries.
 
-The core functionality of this application revolves around the fetchWeather function, which follows a four-step process:
-Authentication Check: The function first verifies that the Firebase user is authenticated and the Firestore client (db) is ready.
-Cache Lookup: It checks a public Firestore collection (/artifacts/{appId}/public/data/weather_cache/{city_name}).
-If the document exists and the stored timestamp is less than 5 minutes old, the data is returned immediately with a source: 'cache' tag.
+3. Hybrid Rate Limiting
+    - Soft Limit: Cached requests get a higher allowance.
+    - Hard Limit: External API requests are throttled strictly.
+    - Implemented with Redis (Upstash) for serverless scalability.
 
-External Fetch (Cache Miss):
-If the document is missing or the data is older than 5 minutes (stale), the application makes a call to the simulated external weather $\text{API}$.
-If the $\text{API}$ call fails, it implements an exponential backoff retry strategy before failing completely.
+4. Resilient Error Handling
+    - Exponential backoff for retries on API failures.
+    - Stale-while-revalidate: Serve near-fresh cached data while refreshing in the background.
 
-Cache & History Update:
-On a successful $\text{API}$ fetch, the new data and the current timestamp are written back to the public Firestore cache.
-The latest result is also saved to the user's private search_history collection (/artifacts/{appId}/users/{userId}/search_history), which triggers the real-time history log update.
-This architecture ensures that repeated searches for the same city rapidly return results from the secure cloud cache, significantly optimizing performance.
+5. Client-Side Search History
+    - Tracks recent searches in React state.
+    - Updates instantly in the UI, no server storage required.
 
-## Getting Started (Local Setup)
+## Tech Stack
+- Frontend: React 18, Tailwind CSS (Dynamic Weather UI)
+- Backend: Next.js Serverless Functions (API Routes)
+- Cache / Rate Limit: Redis (Upstash)
+- Database / Cache Store: Firebase Firestore
+- Authentication: Firebase Auth (user-scoped history)
+- Type Safety: TypeScript interfaces for API responses
 
-To run this project locally, you must first configure the Firebase SDK environment variables, as the application relies on Firestore for both caching and history tracking.
+## Local Setup
+1. Clone repository
+```
+git clone https://github.com/rabebe/api-caching-proxy.git
+cd api-caching-proxy
+```
 
-### 1. Prerequisites
+2. Install dependencies
+```
+npm install
+```
+3. Configure environment variables
+    Create a .env.local file
 
- - Node.js (LTS version recommended)
- - npm or Yarn
+```
+# Firebase
+NEXT_PUBLIC_FIREBASE_API_KEY="AIza..."
+NEXT_PUBLIC_FIREBASE_PROJECT_ID="your-project-id"
 
-2. Installation
-    - Clone the repository:
+# Redis (Rate Limiting)
+REDIS_URL="https://..."
 
-        ```
-        git clone [repository-url]
-        cd caching-weather-client
-        ```
+# Weather Provider
+WEATHER_API_KEY="your_secret_key"
+```
+4. Run development server
+```
+npm run dev
+```
 
-    - Install dependencies:
+The app will run at http://localhost:3000
 
-        npm install
-        or
-        yarn install
-
-
-3. Environment Configuration
-
-    Create a file named .env.local in the root directory of the project and populate it with your Firebase configuration credentials.
-    Note: These credentials are used by both the client-side React code and the server-side API routes.
-
-    ```
-    #.env.local
-
-    REQUIRED: Your Firebase API Key
-    NEXT_PUBLIC_FIREBASE_API_KEY="AIzaSy...your-api-key"
-
-    REQUIRED: Your Firebase Project ID
-    NEXT_PUBLIC_FIREBASE_PROJECT_ID="your-project-id"
-
-    REQUIRED: Your Firebase App ID (Used as the default App Name)
-    NEXT_PUBLIC_FIREBASE_APP_ID="1:99999999999:web:aaaaaaaaaaaaaaaaaaaa"
-
-    OPTIONAL: Other Firebase Config fields
-    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="your-project.firebaseapp.com"
-    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="your-project.appspot.com"
-    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="99999999999"
-    ```
-
-4. Running the Application
-    - Start the development server:
-    - npm run dev or yarn dev
-    - The application will be accessible at http://localhost:3000 (or the port specified by your development environment).
+## Future Improvements
+- Edge caching via Vercel Edge Functions for <20ms latency.
+- Aggregating multiple weather providers for consensus-based forecasts.
+- Analytics dashboard to track cache hit/miss rates and API cost savings.
